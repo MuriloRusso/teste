@@ -1,0 +1,601 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use Carbon\Carbon;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use App\Participant;
+use App\User;
+use App\Product;
+use MongoDB\Driver\Session;
+use function foo\func;
+
+class MySweepstakesController extends Controller
+{
+    public function index(Request $request)
+    {
+
+        $search = $request->get('search');
+        
+        // informações de user logado pelo sistema do laravel
+        $user = Auth::user();
+        // todas as informações dos produtos do usuário logado
+        //$produtos = $user->products()->first();
+        //dd($request);
+        $rifas = DB::table('products')
+                    ->select('products.id', 'products.name', 'products.modo_de_jogo', 'products.price', 'products.type_raffles', 'products.winner', 'products.slug', 'products_images.name as image', 'raffles.number as total_number', 'product_description.description as description', 'products.status', 'products.draw_date', 'products.draw_prediction', 'products.visible', 'products.favoritar')
+                    ->join('products_images', 'products.id', 'products_images.product_id')
+                    ->join('product_description', 'products.id', 'product_description.product_id')
+                    ->join('raffles', 'products.id', 'raffles.product_id')
+                    ->where('products.user_id', '=', Auth::user()->id)
+                    ->groupBy('products.id')
+                    ->orderBy('products.id', 'DESC')
+                    ->get();
+        //$id_produto = $rifas['']->id;
+        //dd($rifas[1]->name);
+        $total_numeros = DB::table('raffles')
+            ->select('raffles.number')
+            ->where('raffles.product_id', '=', 3)
+            ->get()
+            ->count();
+        return view('my-sweepstakes', [
+            
+            'rifas' => $rifas,
+            'total_numeros' => $total_numeros,
+
+        ]);
+    }
+    public static function createSlug($string)
+    {
+
+        $table = array(
+            'Š' => 'S', 'š' => 's', 'Đ' => 'Dj', 'đ' => 'dj', 'Ž' => 'Z', 'ž' => 'z', 'Č' => 'C', 'č' => 'c', 'Ć' => 'C', 'ć' => 'c',
+            'À' => 'A', 'Á' => 'A', 'Â' => 'A', 'Ã' => 'A', 'Ä' => 'A', 'Å' => 'A', 'Æ' => 'A', 'Ç' => 'C', 'È' => 'E', 'É' => 'E',
+            'Ê' => 'E', 'Ë' => 'E', 'Ì' => 'I', 'Í' => 'I', 'Î' => 'I', 'Ï' => 'I', 'Ñ' => 'N', 'Ò' => 'O', 'Ó' => 'O', 'Ô' => 'O',
+            'Õ' => 'O', 'Ö' => 'O', 'Ø' => 'O', 'Ù' => 'U', 'Ú' => 'U', 'Û' => 'U', 'Ü' => 'U', 'Ý' => 'Y', 'Þ' => 'B', 'ß' => 'Ss',
+            'à' => 'a', 'á' => 'a', 'â' => 'a', 'ã' => 'a', 'ä' => 'a', 'å' => 'a', 'æ' => 'a', 'ç' => 'c', 'è' => 'e', 'é' => 'e',
+            'ê' => 'e', 'ë' => 'e', 'ì' => 'i', 'í' => 'i', 'î' => 'i', 'ï' => 'i', 'ð' => 'o', 'ñ' => 'n', 'ò' => 'o', 'ó' => 'o',
+            'ô' => 'o', 'õ' => 'o', 'ö' => 'o', 'ø' => 'o', 'ù' => 'u', 'ú' => 'u', 'û' => 'u', 'ý' => 'y', 'ý' => 'y', 'þ' => 'b',
+            'ÿ' => 'y', 'Ŕ' => 'R', 'ŕ' => 'r', '/' => '-', ' ' => '-'
+        );
+
+        // -- Remove duplicated spaces
+        $stripped = preg_replace(array('/\s{2,}/', '/[\t\n]/'), ' ', $string);
+
+
+        // -- Returns the slug
+        return strtolower(strtr($string, $table));
+    }
+    public function update(Request $request, $id)
+    {
+
+
+
+        $rifa_edit = Product::find($id)->update(
+            [
+                'name' => $request->name,
+                'price' => $request->price,
+                'status' => $request->status,
+                'draw_date' => $request->data,
+                'type_raffles' => 'automatico',
+                'slug' => $this->createSlug($request->name),
+                'user_id' => Auth::user()->id,
+                'visible' => $request->visible,
+                'favoritar' => $request->favoritar_rifa,
+                'winner' => $request->cadastrar_ganhador,
+                'type_raffles' => $request->tipo_reserva,
+                'draw_date' => $request->data_sorteio,
+                'draw_prediction' => $request->previsao_sorteio,
+                'created_at' => Carbon::now(),
+                'updated_at' => Carbon::now()
+                /*
+                'modo_de_jogo' => $request->rifa_numero,
+                */
+            ]
+        );
+        /*$inputs = $request->all();
+        //dd($inputs);
+        //$rifa_edit->fill($inputs)->update();
+        $rifa_edit->fill($inputs)->update();
+        //$rifa_edit->save($request->all());
+        //dd($teste);*/
+
+        return redirect()->back()->with('success', 'Edição da Rifa efetuado com sucesso!');
+    } 
+    
+    public function getRaffles(Request $request)
+    {
+
+        if (json_encode($request->search['value']) != 'null') {
+            $raffles = DB::table('raffles')
+                ->select('raffles.*', 'participant.name as participant', 'participant.telephone', 'participant.created_at')
+                ->leftJoin('participant', 'raffles.id', 'participant.raffles_id')
+                ->where('raffles.product_id', '=', $request->product_id)
+                ->where('raffles.number', 'like', '%' . $request->search['value'] . '%')
+                ->offset($request->start)
+                ->limit($request->length)
+                ->get();
+
+            $rafflesCountAll = DB::table('raffles')
+                ->select('raffles.*', 'participant.name as participant', 'participant.telephone', 'participant.created_at')
+                ->leftJoin('participant', 'raffles.id', 'participant.raffles_id')
+                ->where('raffles.product_id', '=', $request->product_id)
+                ->where('raffles.number', 'like', '%' . $request->search['value'] . '%')
+                ->get();
+
+            $participantSearchCount = count($rafflesCountAll);
+        } else if ($request->columns[0]['search']['value'] != null) {
+            $raffles = DB::table('raffles')
+                ->select('raffles.*', 'participant.name as participant', 'participant.telephone', 'participant.created_at')
+                ->leftJoin('participant', 'raffles.id', 'participant.raffles_id')
+                ->where('raffles.product_id', '=', $request->product_id)
+                ->where('raffles.number', 'like', '%' . $request->columns[0]['search']['value'] . '%')
+                ->offset($request->start)
+                ->limit($request->length)
+                ->get();
+
+            $rafflesCountAll = DB::table('raffles')
+                ->select('raffles.*', 'participant.name as participant', 'participant.telephone', 'participant.created_at')
+                ->leftJoin('participant', 'raffles.id', 'participant.raffles_id')
+                ->where('raffles.product_id', '=', $request->product_id)
+                ->where('raffles.number', 'like', '%' . $request->columns[0]['search']['value'] . '%')
+                ->get();
+
+            $participantSearchCount = count($rafflesCountAll);
+        } else if ($request->columns[1]['search']['value'] != null) {
+            $raffles = DB::table('raffles')
+                ->select('raffles.*', 'participant.name as participant', 'participant.telephone', 'participant.created_at')
+                ->leftJoin('participant', 'raffles.id', 'participant.raffles_id')
+                ->where('raffles.product_id', '=', $request->product_id)
+                ->where('raffles.status', 'like', '%' . $request->columns[1]['search']['value'] . '%')
+                ->offset($request->start)
+                ->limit($request->length)
+                ->get();
+
+            $rafflesCountAll = DB::table('raffles')
+                ->select('raffles.*', 'participant.name as participant', 'participant.telephone', 'participant.created_at')
+                ->leftJoin('participant', 'raffles.id', 'participant.raffles_id')
+                ->where('raffles.product_id', '=', $request->product_id)
+                ->where('raffles.status', 'like', '%' . $request->columns[1]['search']['value'] . '%')
+                ->get();
+
+            $participantSearchCount = count($rafflesCountAll);
+        } else if ($request->columns[2]['search']['value'] != null) {
+            $raffles = DB::table('raffles')
+                ->select('raffles.*', 'participant.name as participant', 'participant.telephone', 'participant.created_at')
+                ->leftJoin('participant', 'raffles.id', 'participant.raffles_id')
+                ->where('raffles.product_id', '=', $request->product_id)
+                ->where('participant.name', 'like', '%' . $request->columns[2]['search']['value'] . '%')
+                ->offset($request->start)
+                ->limit($request->length)
+                ->get();
+
+            $rafflesCountAll = DB::table('raffles')
+                ->select('raffles.*', 'participant.name as participant', 'participant.telephone', 'participant.created_at')
+                ->leftJoin('participant', 'raffles.id', 'participant.raffles_id')
+                ->where('raffles.product_id', '=', $request->product_id)
+                ->where('participant.name', 'like', '%' . $request->columns[2]['search']['value'] . '%')
+                ->get();
+
+            $participantSearchCount = count($rafflesCountAll);
+        } else if ($request->columns[3]['search']['value'] != null) {
+            $raffles = DB::table('raffles')
+                ->select('raffles.*', 'participant.name as participant', 'participant.telephone', 'participant.created_at')
+                ->leftJoin('participant', 'raffles.id', 'participant.raffles_id')
+                ->where('raffles.product_id', '=', $request->product_id)
+                ->where('participant.telephone', 'like', '%' . $request->columns[3]['search']['value'] . '%')
+                ->offset($request->start)
+                ->limit($request->length)
+                ->get();
+
+            $rafflesCountAll = DB::table('raffles')
+                ->select('raffles.*', 'participant.name as participant', 'participant.telephone', 'participant.created_at')
+                ->leftJoin('participant', 'raffles.id', 'participant.raffles_id')
+                ->where('raffles.product_id', '=', $request->product_id)
+                ->where('participant.telephone', 'like', '%' . $request->columns[3]['search']['value'] . '%')
+                ->get();
+
+            $participantSearchCount = count($rafflesCountAll);
+        } else if ($request->columns[4]['search']['value'] != null) {
+
+            //TRATA DATA BR
+            $dataColumn = explode("/", $request->columns[4]['search']['value']);
+            $resultColumn = $dataColumn[2] . '-' . $dataColumn[1] . '-' . $dataColumn[0];
+
+            $raffles = DB::table('raffles')
+                ->select('raffles.*', 'participant.name as participant', 'participant.telephone', 'participant.created_at')
+                ->leftJoin('participant', 'raffles.id', 'participant.raffles_id')
+                ->where('raffles.product_id', '=', $request->product_id)
+                //->where('participant.created_at', 'like', $resultColumn . '%')
+                ->whereBetween('participant.created_at', [$resultColumn . ' 00:00:00', $resultColumn . ' 23:59:59'])
+                ->where('raffles.status', '=', 'Reservado')
+                ->offset($request->start)
+                ->limit($request->length)
+                ->orderBy('participant.created_at', 'DESC')
+                ->get();
+
+            $rafflesCountAll = DB::table('raffles')
+                ->select('raffles.*', 'participant.name as participant', 'participant.telephone', 'participant.created_at')
+                ->leftJoin('participant', 'raffles.id', 'participant.raffles_id')
+                ->where('raffles.product_id', '=', $request->product_id)
+                //->where('participant.created_at', 'like', $resultColumn . '%')
+                ->whereBetween('participant.created_at', [$resultColumn . ' 00:00:00', $resultColumn . ' 23:59:59'])
+                ->where('raffles.status', '=', 'Reservado')
+                ->orderBy('participant.created_at', 'DESC')
+                ->get();
+
+            $participantSearchCount = count($rafflesCountAll);
+        } else if ($request->columns[5]['search']['value'] != null) {
+
+            //TRATA DATA BR
+            $dataColumn = explode("/", $request->columns[5]['search']['value']);
+            $resultColumn = $dataColumn[2] . '-' . $dataColumn[1] . '-' . $dataColumn[0];
+
+            $raffles = DB::table('raffles')
+                ->select('raffles.*', 'participant.name as participant', 'participant.telephone', 'participant.created_at')
+                ->leftJoin('participant', 'raffles.id', 'participant.raffles_id')
+                ->where('raffles.product_id', '=', $request->product_id)
+                //->where('raffles.updated_at', 'like', $resultColumn . '%')
+                ->whereBetween('raffles.updated_at', [$resultColumn . ' 00:00:00', $resultColumn . ' 23:59:59'])
+                ->where('raffles.status', '=', 'Pago')
+                ->offset($request->start)
+                ->limit($request->length)
+                ->orderBy('participant.created_at', 'DESC')
+                ->get();
+
+            $rafflesCountAll = DB::table('raffles')
+                ->select('raffles.*', 'participant.name as participant', 'participant.telephone', 'participant.created_at')
+                ->leftJoin('participant', 'raffles.id', 'participant.raffles_id')
+                ->where('raffles.product_id', '=', $request->product_id)
+                //->where('raffles.updated_at', 'like', $resultColumn . '%')
+                ->whereBetween('raffles.updated_at', [$resultColumn . ' 00:00:00', $resultColumn . ' 23:59:59'])
+                ->where('raffles.status', '=', 'Pago')
+                ->orderBy('participant.created_at', 'DESC')
+                ->get();
+
+            $participantSearchCount = count($rafflesCountAll);
+        } else {
+            $raffles = DB::table('raffles')
+                ->select('raffles.*', 'participant.name as participant', 'participant.telephone', 'participant.created_at')
+                ->leftJoin('participant', 'raffles.id', 'participant.raffles_id')
+                ->where('raffles.product_id', '=', $request->product_id)
+                ->offset($request->start)
+                ->limit($request->length)
+                ->get();
+
+            $rafflesCountAll = DB::table('raffles')
+                ->select('raffles.*', 'participant.name as participant', 'participant.telephone', 'participant.created_at')
+                ->leftJoin('participant', 'raffles.id', 'participant.raffles_id')
+                ->where('raffles.product_id', '=', $request->product_id)
+                ->get();
+
+            $participantSearchCount = count($rafflesCountAll);
+        }
+
+        $result = [];
+
+        foreach ($raffles as $raffle) {
+            $result[] = [
+                "number" => $raffle->number,
+                "status" => $raffle->status,
+                "name" => $raffle->participant,
+                "telephone" => $raffle->telephone,
+                "updated_at" => Carbon::parse($raffle->updated_at)->format('d/m/Y H:i:s'),
+                "created_at" => Carbon::parse($raffle->created_at)->format('d/m/Y H:i:s')
+            ];
+        }
+
+        return json_encode([
+            "draw" => $request->draw,
+            "recordsTotal" => $participantSearchCount,
+            "recordsFiltered" => $participantSearchCount,
+            "data" => $result
+        ]);
+    }
+
+    public function editRaffles(Request $request)
+    {
+        //METODO PARA AJAX
+        if ($request->rowData['status'] == 'Disponível') {
+            $result[] = [
+                "number" => $request->rowData['number'],
+                "status" => $request->rowData['status'],
+                "name" => $request->rowData['name'],
+                "telephone" => $request->rowData['telephone'],
+                "updated_at" => $request->rowData['updated_at'],
+                "created_at" => $request->rowData['created_at']
+            ];
+        } else {
+            if ($request->rowData['status'] == 'Reservado') {
+                $raffles = DB::table('raffles')
+                    ->select('raffles.*', 'participant.name as participant', 'participant.telephone', 'participant.created_at')
+                    ->leftJoin('participant', 'raffles.id', 'participant.raffles_id')
+                    ->leftJoin('payment_pix', 'participant.id', 'payment_pix.participant_id')
+                    ->where('raffles.number', $request->rowData['number'])
+                    ->where('raffles.product_id', $request->product_id)
+                    ->update([
+                        'raffles.status' => 'Pago',
+                        'raffles.updated_at' => Carbon::now(),
+                        'payment_pix.status' => 'Concluída',
+                    ]);
+
+                //dd($raffles);
+
+                $result[] = [
+                    "number" => $request->rowData['number'],
+                    "status" => 'Pago',
+                    "name" => $request->rowData['name'],
+                    "telephone" => $request->rowData['telephone'],
+                    "updated_at" => $request->rowData['updated_at'],
+                    "created_at" => $request->rowData['created_at']
+                ];
+            } elseif ($request->rowData['status'] == 'Pago') {
+                $raffles = DB::table('raffles')
+                    ->select('raffles.*', 'participant.name as participant', 'participant.telephone', 'participant.created_at')
+                    ->leftJoin('participant', 'raffles.id', 'participant.raffles_id')
+                    ->leftJoin('payment_pix', 'participant.id', 'payment_pix.participant_id')
+                    ->where('raffles.number', $request->rowData['number'])
+                    ->where('raffles.product_id', $request->product_id)
+                    ->update([
+                        'raffles.status' => 'Reservado',
+                        'raffles.updated_at' => Carbon::now(),
+                        'payment_pix.status' => 'Pendente',
+                    ]);
+
+                //dd($raffles);
+
+                $result[] = [
+                    "number" => $request->rowData['number'],
+                    "status" => 'Reservado',
+                    "name" => $request->rowData['name'],
+                    "telephone" => $request->rowData['telephone'],
+                    "updated_at" => $request->rowData['updated_at'],
+                    "created_at" => $request->rowData['created_at']
+                ];
+            }
+        }
+
+
+        return $result;
+    }
+
+    public function profile()
+    {
+        $users = DB::table('users')
+            ->select('users.name', 'users.email', 'users.telephone', 'consulting_environments.key_pix', 'consulting_environments.key_pix_public', 'consulting_environments.pixel', 'consulting_environments.verify_domain_fb', 'consulting_environments.facebook', 'consulting_environments.instagram', 'consulting_environments.name as platform', 'consulting_environments.group_whats')
+            ->join('consulting_environments', 'consulting_environments.user_id', '=', 'users.id')
+            ->where('users.id', '=', Auth::user()->id)
+            ->first();
+
+        //dd($users);
+
+        return view('profile', [
+            'users' => $users
+        ]);
+    }
+
+    public function updateProfile(Request $request)
+    {
+
+        //dd($request->all());
+
+        if ($request->senha == null) {
+            $users = DB::table('users')
+                ->where('users.id', Auth::user()->id)
+                ->update(
+                    [
+                        'name' => $request->name,
+                        'telephone' => $request->telephone,
+                        'email' => $request->email
+                    ]
+                );
+        } else {
+            $users = DB::table('users')
+                ->where('users.id', Auth::user()->id)
+                ->update(
+                    [
+                        'name' => $request->name,
+                        'telephone' => $request->telephone,
+                        'email' => $request->email,
+                        'password' => bcrypt($request->senha)
+                    ]
+                );
+        }
+
+        $consulting = DB::table('consulting_environments')
+            ->where('consulting_environments.user_id', Auth::user()->id)
+            ->update(
+                [
+                    'key_pix' => $request->key,
+                    'key_pix_public' => $request->key_public,
+                    'facebook' => $request->facebook,
+                    'instagram' => $request->instagram,
+                    'name' => $request->platform,
+                    'group_whats' => $request->group_whats
+                ]
+            );
+
+        return redirect()->back();
+    }
+
+    /*public function chargeReservation(Request $request)
+    {
+
+        //dd($request->all());
+
+        $product = DB::table('products')
+            ->select('products.id', 'products.name', 'products.product', 'consulting_environments.key_pix', 'products.price')
+            ->join('consulting_environments', 'consulting_environments.user_id', '=', 'products.user_id')
+            ->where('products.id', '=', $request->productID)
+            ->first();
+
+        $pix = str_replace(' ', '%20', $product->key_pix);
+
+        $participant = DB::table('participant')
+            ->select('*')
+            //->join('payment_pix', 'payment_pix.participant_id', 'participant.id')
+            ->join('raffles', 'raffles.id', 'participant.raffles_id')
+            ->where('participant.product_id', '=', $request->productID)
+            ->where('participant.telephone', '=', $request->telephone)
+            ->where('raffles.status', '=', 'Reservado')
+            ->get();
+
+        $participantConcluded = DB::table('participant')
+            ->select('*')
+            //->join('payment_pix', 'payment_pix.participant_id', 'participant.id')
+            ->join('raffles', 'raffles.id', 'participant.raffles_id')
+            ->where('participant.product_id', '=', $request->productID)
+            ->where('participant.telephone', '=', $request->telephone)
+            ->where('raffles.status', '=', 'Pago')
+            ->get();
+
+        foreach ($participant as $rafflesNumber) {
+            $resultRaffles[] = $rafflesNumber->number;
+        }
+
+        foreach ($participantConcluded as $rafflesNumberConcluded) {
+            $resultRafflesConcluded[] = $rafflesNumberConcluded->number;
+        }
+
+        //CONVERTE PARA EUA DEPOIS BR
+        $convertPrice = str_replace(',', '.', $product->price);
+        $totalPrice = $convertPrice * count($resultRaffles);
+        $convertPriceBR = number_format($totalPrice, 2, ",", ".");
+
+        //PEGA TODOS OS NUMEROS
+        $resultRafflesALL = implode(",", $resultRaffles);
+
+        if (empty($resultRafflesConcluded)) {
+            $resultRafflesConcluded10 = 'Nenhum';
+        } else {
+            $resultRafflesConcluded10 = implode(",", $resultRafflesConcluded);
+        }
+
+        $removeCaracteres = preg_replace('/[^\p{L}\p{N}\s]/', '', $request->telephone);
+        $res = str_replace(' ', '', $removeCaracteres);
+
+        //return redirect()->to('https://api.whatsapp.com/send/?phone=55' . $res . '&text=Olá%20' . $participant[0]->name . ',%20seus%20números%20' . $resultRafflesALL . '%20vão%20expirar%20PAGAMENTO%20IMEDIATO%20para%20evitar%20que%20seus%20números%20sejam%20disponibilizados%20retorne%20ao%20site%20e%20efetue%20o%20seu%20pagamento.%0A%0A' . $product->name . '%0A%0ACotas%20reservado(s):' . $resultRafflesALL . '%0ATotal:%20' . $convertPriceBR  . '%0A%0APIX(CNPJ)%0AFavorecido:%20FABIO%20FERREIRA%20DESENVOLVIMENTO%20DE%20SISTEMAS%20EIRELI%0AChave:%20' . $pix . '%0A%0ASUAS%20RESERVAS!%0A' . 'https://sucessonaescolha.com.br/reserva/' . $product->id . '/' . $res);
+        return redirect()->to('https://api.whatsapp.com/send/?phone=55' . $res . '&text=Olá%20' . $participant[0]->name . ',%20seu(s)%20número(s)%20da%20sorte%20*' . $resultRafflesALL . '*%20vão%20expirar%20PAGAMENTO%20IMEDIATO!%20Para%20evitar%20que%20seus%20números%20sejam%20disponibilizados%20retorne%20ao%20site%20e%20efetue%20o%20seu%20pagamento.%0A%0A' . $product->name . '%0A%0ACotas%20reservada(s):%20*' . $resultRafflesALL . '*%0ATotal:%20' . $convertPriceBR  . '%0A%0ALINK%20PARA%20CONCLUIR%20SUA(S)%20RESERVA(S)!⬇⬇⬇%0A' . 'sucessonaescolha.com.br/reserva-manual/' . $product->id . '/' . $res . '%0A%0A🚨%20Acompanhe%20as%20atualizações%20do%20sorteio%20no%20GRUPO%20%0A%0Ahttps://chat.whatsapp.com/KgbtPCgBgqGDJAJfwrF83i');
+    }*/
+
+    /*public function thanks(Request $request)
+    {
+
+        //dd($request->all());
+
+        $product = DB::table('products')
+            ->select('products.id', 'products.name', 'products.product', 'consulting_environments.key_pix', 'products.price')
+            ->join('consulting_environments', 'consulting_environments.user_id', '=', 'products.user_id')
+            ->where('products.id', '=', $request->productID)
+            ->first();
+
+        $pix = str_replace(' ', '%20', $product->key_pix);
+
+        $participant = DB::table('participant')
+            ->select('*')
+            //->join('payment_pix', 'payment_pix.participant_id', 'participant.id')
+            ->join('raffles', 'raffles.id', 'participant.raffles_id')
+            ->where('participant.product_id', '=', $request->productID)
+            ->where('participant.telephone', '=', $request->telephone)
+            ->where('raffles.status', '=', 'Pago')
+            ->get();
+
+        foreach ($participant as $rafflesNumber) {
+            $resultRaffles[] = $rafflesNumber->number;
+        }
+
+        //CONVERTE PARA EUA DEPOIS BR
+        $convertPrice = str_replace(',', '.', $product->price);
+        $totalPrice = $convertPrice * count($resultRaffles);
+        $convertPriceBR = number_format($totalPrice, 2, ",", ".");
+
+        //PEGA TODOS OS NUMEROS
+        $resultRafflesALL = implode(",", $resultRaffles);
+
+        //dd($resultRafflesALL);
+
+        $removeCaracteres = preg_replace('/[^\p{L}\p{N}\s]/', '', $request->telephone);
+        $res = str_replace(' ', '', $removeCaracteres);
+
+        //return redirect()->to('https://api.whatsapp.com/send/?phone=55' . $res . '&text=Fala%20' . $participant[0]->name . ',%20obrigado%20por%20participar%20da%20ação%20entre%20amigos%20*' . $product->product . '*%20e%20boa%20sorte!!!🍀🤞🤞🤞%0A%0ASua(s)%20Cota(s)%20Paga(s):%20*' . $resultRafflesALL . '*%0A%0APara%20consultar%20as%20suas%20cotas%20pagas%20basta%20acessar%20o%20link%20abaixo!%0Ahttps://sucessonaescolha.com.br/reserva/' . $product->id . '/' . $res . '%0A%0AO%20sorteio%20vai%20ser%20agendado%20após%20a%20venda%20das%20cotas,%20você%20pode%20acompanhar%20no%20site%20o%20progresso%20🤞🍀%0A%0ASiga-nos%20nas%20redes%20sociais!%0A%0AInstagram%0Ahttps://www.instagram.com/sucessonaescolhaoficial/%0A%0AFacebook%0Ahttps://www.facebook.com/sucessonaescolhaoficial%0A%0AQualquer%20dúvida%20pode%20me%20chamar.');
+        return redirect()->to('https://api.whatsapp.com/send/?phone=55' . $res . '&text=Fala%20' . $participant[0]->name . ',%20obrigado%20por%20participar%20da%20ação%20entre%20amigos%20*' . $product->product . '*%20e%20boa%20sorte!!!🍀🤞🤞🤞%0A%0ASua(s)%20Cota(s)%20Paga(s):%20*' . $resultRafflesALL . '*%0A%0APara%20consultar%20as%20suas%20cotas%20pagas%20basta%20acessar%20o%20link%20abaixo!%0Asucessonaescolha.com.br/reserva-manual/' . $product->id . '/' . $res . '%0A%0A🚨%20Acompanhe%20as%20atualizações%20do%20sorteio%20no%20GRUPO%20%0A%0Ahttps://chat.whatsapp.com/KgbtPCgBgqGDJAJfwrF83i');
+    }*/
+
+    public function removeReserved(Request $request)
+    {
+        $participants = DB::table('participant')
+            ->select('participant.id', 'participant.raffles_id', 'participant.name', 'participant.telephone', 'participant.product_id', 'payment_pix.key_pix', 'payment_pix.status')
+            ->join('raffles', 'participant.raffles_id', '=', 'raffles.id')
+            ->leftJoin('payment_pix', 'participant.id', '=', 'payment_pix.participant_id')
+            ->where('participant.product_id', '=', $request->product_id)
+            ->where('raffles.status', '=', 'Reservado')
+            ->get();
+
+        Log::info($participants);
+
+        foreach ($participants as $participant) {
+            //DEIXA DISPONIVEL OS NUMEROS NOVAMENTE
+            DB::table('raffles')
+                ->where('id', $participant->raffles_id)
+                ->where('product_id', $participant->product_id)
+                ->update(['status' => 'Disponível']);
+
+            //CADASTRA NA TABELA DE PARTICIPANTES QUE N PAGARAM PARA CONTROLE
+            DB::table('drop_participants')->insert(
+                [
+                    'name' => $participant->name,
+                    'participant_id' => $participant->id,
+                    'telephone' => $participant->telephone,
+                    'raffles_id' => $participant->raffles_id,
+                    'product_id' => $participant->product_id,
+                    'created_at' => Carbon::now(),
+                    'updated_at' => Carbon::now()
+                ]
+            );
+
+            if ($participant->key_pix == null) {
+            } else {
+                //CADASTRA NA TABELA DE PAGAMENTOS QUE N PAGARAM PARA CONTROLE
+                DB::table('drop_payment_pix')->insert(
+                    [
+                        'key_pix' => $participant->key_pix,
+                        'status' => $participant->status,
+                        'participant_id' => $participant->id,
+                        'created_at' => Carbon::now(),
+                        'updated_at' => Carbon::now()
+                    ]
+                );
+            }
+
+            //DELETA DADOS DO PIX
+            DB::table('payment_pix')
+                ->where('participant_id', '=', $participant->id)
+                ->where('status', '=', 'Pendente')
+                ->delete();
+
+            //DELETA PARTICIPANTE DEPOIS DE 24 HORAS SEM PAGAR
+            DB::table('participant')
+                ->where('id', '=', $participant->id)
+                ->delete();
+        }
+
+        return redirect()->back();
+    }
+
+    public function pixel(Request $request)
+    {
+        DB::table('consulting_environments')
+            ->where('user_id', Auth::user()->id)
+            ->update(
+                [
+                    'pixel' => $request->pixel,
+                    'verify_domain_fb' => $request->verify
+                ]
+            );
+
+        return redirect()->back();
+    }
+}

@@ -1,0 +1,649 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Payment_pix;
+use Carbon\Carbon;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Redirect;
+use QRcode;
+
+class CheckoutController extends Controller
+{
+    public function index(Request $request)
+    {
+
+        //dd("AQUI");
+
+        $telephoneConsulting = DB::table('products')
+            ->select('users.telephone')
+            ->join('users', 'users.id', '=', 'products.user_id')
+            ->where('products.id', '=', $request->productID)
+            ->first();
+
+        return view('checkout', [
+            'participant' => $request->participant,
+            'cpf' => $request->cpf,
+            'telephone' => $request->telephone,
+            'numbers' => $request->numbers,
+            'price' => $request->price,
+            'product' => $request->product,
+            'productID' => $request->productID,
+            'drawdate' => $request->drawdate,
+            'image' => $request->image,
+            'PIX' => $request->PIX,
+            'codePIX' => $request->codePIX,
+            'imagePIX' => $request->imagePIX,
+            'telephoneConsulting' => $telephoneConsulting,
+            'countRaffles' => $request->countRaffles,
+            'priceUnic' => $request->priceUnic,
+        ]);
+    }
+
+    public function checkoutManualy(Request $request)
+    {
+
+        $telephoneConsulting = DB::table('products')
+            ->select('users.telephone')
+            ->join('users', 'users.id', '=', 'products.user_id')
+            ->where('products.id', '=', $request->productID)
+            ->first();
+        
+        
+        $userData = [
+            'participant' => $request->participant,
+            'cpf' => $request->cpf,
+            'email' => $request->email,
+            'telephone' => $request->telephone,
+            'numbers' => $request->numbers,
+            'price' => $request->price,
+            'product' => $request->product,
+            'productID' => $request->productID,
+            'drawdate' => $request->drawdate,
+            'image' => $request->image,
+            'PIX' => $request->PIX,
+            'codePIX' => $request->codePIX,
+            'imagePIX' => $request->imagePIX,
+            'telephoneConsulting' => $telephoneConsulting,
+            'countRaffles' => $request->countRaffles,
+            'priceUnic' => $request->priceUnic,
+            'codePIX' => $request->codePIX,
+            'qrCode' => $request->qrCode,
+            'codePIXID' => $request->codePIXID
+        ];
+
+        
+
+        return view('checkout-manualy', $userData);
+    }
+
+    public function checkPixPaymment()
+    {
+        $codeKeyPIX = DB::table('consulting_environments')
+            ->select('key_pix')
+            ->where('user_id', '=', 1)
+            ->first();
+
+        if (env('APP_ENV') == 'local') {
+            $secretKey = 'TEST-330207199077363-081623-283cea3525fa71a8e4d1afa279bf8e8c-197295574';
+        } else {
+            $secretKey = $codeKeyPIX->key_pix;
+        }
+
+        \MercadoPago\SDK::setAccessToken($secretKey);
+
+        $payment = new \MercadoPago\Payment();
+
+        //$payment = new MercadoPago\Payment();
+        $payment->transaction_amount = 0.11;
+        $payment->description = "Título do produto";
+        $payment->payment_method_id = "pix";
+        $payment->notification_url = "https://google.com.br/notiification.php";
+        $payment->external_reference = 1520;
+        $payment->payer = array(
+            "email" => "tester@email.com",
+            "first_name" => "Test",
+            "last_name" => "User",
+            "identification" => array(
+                "type" => "CPF",
+                "number" => "62103474368"
+            ),
+            "address"=>  array(
+                "zip_code" => "06233200",
+                "street_name" => "Av. das Nações Unidas",
+                "street_number" => "3003",
+                "neighborhood" => "Bonfim",
+                "city" => "Osasco",
+                "federal_unit" => "SP"
+            )
+        );
+
+        $payment->save();
+        //
+        echo "<pre>";
+        var_dump($payment->id);
+        echo "</pre>";
+    }
+
+    public function findPixStatus($id = '55929264220')
+    {
+        
+        $codeKeyPIX = DB::table('consulting_environments')
+            ->select('key_pix')
+            ->where('user_id', '=', 1)
+            ->first();
+
+        if (env('APP_ENV') == 'local') {
+            $secretKey = 'TEST-330207199077363-081623-283cea3525fa71a8e4d1afa279bf8e8c-197295574';
+        } else {
+            $secretKey = $codeKeyPIX->key_pix;
+        }
+
+        \MercadoPago\SDK::setAccessToken($secretKey);
+
+        $payment = new \MercadoPago\Payment();
+
+        $payment = \MercadoPago\Payment::find_by_id($id);
+        $payment->capture = true;
+        $payment->update();
+
+        if($payment->status == "approved" && $payment->status_detail == "accredited"){
+            
+            DB::table('payment_pix')
+            ->where('key_pix', $id)
+            ->update(['status' => 'Aprovado']);
+
+            $response = [
+                'status' => TRUE
+            ];
+
+            return json_encode($response);
+        }
+    
+    }
+
+    public function consultingReservation(Request $request)
+    {
+
+        //METODO consultingReservationTelephone E consultingReservation SÃO IGUAIS SEMPRE DEIXAR OS DOIS PARECIDOS
+
+        $product = DB::table('products')
+            ->select('products.id', 'products.name', 'consulting_environments.key_pix', 'products.price', 'products.draw_date')
+            ->join('consulting_environments', 'consulting_environments.user_id', '=', 'products.user_id')
+            ->where('products.id', '=', $request->productID)
+            ->first();
+
+        $participantDetail = DB::table('participant')
+            ->select('*')
+            ->where('participant.product_id', '=', $request->productID)
+            ->where('participant.telephone', '=', $request->telephone)
+            ->first();
+
+        $participant = DB::table('participant')
+            ->select('*')
+            ->join('raffles', 'raffles.id', 'participant.raffles_id')
+            ->where('participant.product_id', '=', $request->productID)
+            ->where('participant.telephone', '=', $request->telephone)
+            ->where('raffles.status', '=', 'Pago')
+            ->get();
+
+        //dd($participant);
+
+        $orderParticipants = DB::table('order')
+            ->select('order.id', 'order.key_pix', 'payment_pix.full_pix')
+            ->join('payment_pix', 'payment_pix.key_pix', 'order.key_pix')
+            ->join('participant', 'participant.id', 'payment_pix.participant_id')
+            ->join('raffles', 'raffles.id', 'participant.raffles_id')
+            ->where('participant.product_id', '=', $request->productID)
+            ->where('participant.telephone', '=', $request->telephone)
+            ->where('raffles.status', '=', 'Reservado')
+            ->groupBy('order.id')
+            ->get();
+
+        //dd($orderParticipants);
+
+        $participantReserveds = DB::table('participant')
+            ->select('participant.id as user', 'raffles.*', 'payment_pix.*')
+            ->join('raffles', 'raffles.id', 'participant.raffles_id')
+            ->join('payment_pix', 'payment_pix.participant_id', 'participant.id')
+            ->where('participant.product_id', '=', $request->productID)
+            ->where('participant.telephone', '=', $request->telephone)
+            ->where('raffles.status', '=', 'Reservado')
+            ->get();
+
+        if ($participantReserveds == '[]') {
+        } else {
+            foreach ($participantReserveds as $rafflesNumber) {
+
+                $resultParticipantID[] = $rafflesNumber->user;
+                $resultRaffles[] = $rafflesNumber->number;
+            }
+
+            $numbers = implode(",", $resultRaffles);
+
+            $price = count($resultRaffles) * floatval($product->price);
+            $resultPricePIX = number_format($price, 2, ".", ",");
+            $convertPriceBR = number_format($price, 2, ",", ".");
+        }
+
+        $telephoneConsulting = DB::table('products')
+            ->select('users.telephone')
+            ->join('users', 'users.id', '=', 'products.user_id')
+            ->where('products.id', '=', $request->productID)
+            ->first();
+
+
+        return view('consulting-reservation', [
+            'product' => $product,
+            'participantDetail' => $participantDetail,
+            'resultRafflesALLs' => $participant,
+            'orderParticipants' => $orderParticipants,
+            'participantReserveds' => $participantReserveds,
+            'priceReserveds' => @$resultPricePIX,
+            'numberReserveds' => @$numbers,
+            'telephone' => @$telephoneConsulting,
+            'priceBR' => @$convertPriceBR
+        ]);
+    }
+
+    public function consultingReservationTelephone(Request $request, $productID, $telephone)
+    {
+
+        $substr = substr($telephone, 0, 2);
+        $ddd = '(' . $substr . ')';
+        $substr1 = ' ' . substr($telephone, 2, 5) . '-';
+        $substr2 = substr($telephone, 7);
+        $resultTelephone = $ddd . $substr1 . $substr2;
+
+        $product = DB::table('products')
+            ->select('products.id', 'products.name', 'consulting_environments.key_pix', 'products.price', 'products.draw_date')
+            ->join('consulting_environments', 'consulting_environments.user_id', '=', 'products.user_id')
+            ->where('products.id', '=', $productID)
+            ->first();
+
+
+        $participantDetail = DB::table('participant')
+            ->select('*')
+            ->where('participant.product_id', '=', $productID)
+            ->where('participant.telephone', '=', $resultTelephone)
+            ->first();
+
+        $participant = DB::table('participant')
+            ->select('*')
+            ->join('raffles', 'raffles.id', 'participant.raffles_id')
+            ->where('participant.product_id', '=', $productID)
+            ->where('participant.telephone', '=', $resultTelephone)
+            ->where('raffles.status', '=', 'Pago')
+            ->get();
+
+        $orderParticipants = DB::table('order')
+            ->select('order.id', 'order.key_pix', 'payment_pix.full_pix')
+            ->join('payment_pix', 'payment_pix.key_pix', 'order.key_pix')
+            ->join('participant', 'participant.id', 'payment_pix.participant_id')
+            ->join('raffles', 'raffles.id', 'participant.raffles_id')
+            ->where('participant.product_id', '=', $productID)
+            ->where('participant.telephone', '=', $resultTelephone)
+            ->where('raffles.status', '=', 'Reservado')
+            ->groupBy('order.id')
+            ->get();
+
+        //dd($orderParticipants);
+
+        $participantReserveds = DB::table('participant')
+            ->select('participant.id as user', 'raffles.*', 'payment_pix.*')
+            ->join('raffles', 'raffles.id', 'participant.raffles_id')
+            ->join('payment_pix', 'payment_pix.participant_id', 'participant.id')
+            ->where('participant.product_id', '=', $productID)
+            ->where('participant.telephone', '=', $resultTelephone)
+            ->where('raffles.status', '=', 'Reservado')
+            ->get();
+
+        /*$participantReserveds = DB::table('participant')
+            ->select('participant.id as user', 'raffles.*', 'payment_pix.full_pix', 'order.id as order')
+            ->join('raffles', 'raffles.id', 'participant.raffles_id')
+            ->join('payment_pix', 'participant.id', 'payment_pix.participant_id')
+            ->join('order', 'payment_pix.key_pix', 'order.key_pix')
+            ->where('participant.product_id', '=', $productID)
+            ->where('participant.telephone', '=', $resultTelephone)
+            ->where('raffles.status', '=', 'Reservado')
+            ->get();*/
+
+        $telephoneConsulting = DB::table('products')
+            ->select('users.telephone')
+            ->join('users', 'users.id', '=', 'products.user_id')
+            ->where('products.id', '=', $request->productID)
+            ->first();
+
+        if ($participantReserveds == '[]') {
+        } else {
+            foreach ($participantReserveds as $rafflesNumber) {
+                $resultParticipantID[] = $rafflesNumber->user;
+                $resultRaffles[] = $rafflesNumber->number;
+            }
+
+            $numbers = implode(",", $resultRaffles);
+
+            $price = count($resultRaffles) * floatval($product->price);
+            $resultPricePIX = number_format($price, 2, ".", ",");
+            $convertPriceBR = number_format($price, 2, ",", ".");
+        }
+
+        return view('consulting-reservation', [
+            'product' => $product,
+            'participantDetail' => $participantDetail,
+            'resultRafflesALLs' => $participant,
+            'orderParticipants' => $orderParticipants,
+            'participantReserveds' => $participantReserveds,
+            'priceReserveds' => @$resultPricePIX,
+            'numberReserveds' => @$numbers,
+            'telephone' => $telephoneConsulting,
+            'priceBR' => @$convertPriceBR
+        ]);
+    }
+
+    public function consultingReservationManualy(Request $request)
+    {
+
+        //METODO consultingReservationTelephone E consultingReservation SÃO IGUAIS SEMPRE DEIXAR OS DOIS PARECIDOS
+
+        $product = DB::table('products')
+            ->select('products.id', 'products.name', 'consulting_environments.key_pix', 'products.price', 'products.draw_date')
+            ->join('consulting_environments', 'consulting_environments.user_id', '=', 'products.user_id')
+            ->where('products.id', '=', $request->productID)
+            ->first();
+
+        $participantDetail = DB::table('participant')
+            ->select('*')
+            ->where('participant.product_id', '=', $request->productID)
+            ->where('participant.telephone', '=', $request->telephone)
+            ->first();
+
+        $participant = DB::table('participant')
+            ->select('*')
+            ->join('raffles', 'raffles.id', 'participant.raffles_id')
+            ->where('participant.product_id', '=', $request->productID)
+            ->where('participant.telephone', '=', $request->telephone)
+            ->where('raffles.status', '=', 'Pago')
+            ->get();
+
+        //dd($participant);
+
+        $orderParticipants = DB::table('order')
+            ->select('order.id', 'order.key_pix', 'payment_pix.full_pix')
+            ->join('payment_pix', 'payment_pix.key_pix', 'order.key_pix')
+            ->join('participant', 'participant.id', 'payment_pix.participant_id')
+            ->join('raffles', 'raffles.id', 'participant.raffles_id')
+            ->where('participant.product_id', '=', $request->productID)
+            ->where('participant.telephone', '=', $request->telephone)
+            ->where('raffles.status', '=', 'Reservado')
+            ->groupBy('order.id')
+            ->get();
+
+        //dd($orderParticipants);
+
+        $participantReserveds = DB::table('participant')
+            ->select('participant.id as user', 'raffles.*')
+            ->join('raffles', 'raffles.id', 'participant.raffles_id')
+            ->where('participant.product_id', '=', $request->productID)
+            ->where('participant.telephone', '=', $request->telephone)
+            ->where('raffles.status', '=', 'Reservado')
+            ->get();
+
+        if ($participantReserveds == '[]') {
+        } else {
+            foreach ($participantReserveds as $rafflesNumber) {
+
+                $resultParticipantID[] = $rafflesNumber->user;
+                $resultRaffles[] = $rafflesNumber->number;
+            }
+
+            $numbers = implode(",", $resultRaffles);
+
+            $price = count($resultRaffles) * floatval($product->price);
+            $resultPricePIX = number_format($price, 2, ".", ",");
+            $convertPriceBR = number_format($price, 2, ",", ".");
+        }
+
+        $telephoneConsulting = DB::table('products')
+            ->select('users.telephone')
+            ->join('users', 'users.id', '=', 'products.user_id')
+            ->where('products.id', '=', $request->productID)
+            ->first();
+
+
+        return view('consulting-reservation-manualy', [
+            'product' => $product,
+            'participantDetail' => $participantDetail,
+            'resultRafflesALLs' => $participant,
+            'orderParticipants' => $orderParticipants,
+            'participantReserveds' => $participantReserveds,
+            'priceReserveds' => @$resultPricePIX,
+            'numberReserveds' => @$numbers,
+            'telephone' => @$telephoneConsulting,
+            'priceBR' => @$convertPriceBR
+        ]);
+    }
+
+    public function consultingReservationTelephoneManualy(Request $request, $productID, $telephone)
+    {
+
+        $substr = substr($telephone, 0, 2);
+        $ddd = '(' . $substr . ')';
+        $substr1 = ' ' . substr($telephone, 2, 5) . '-';
+        $substr2 = substr($telephone, 7);
+        $resultTelephone = $ddd . $substr1 . $substr2;
+
+        $product = DB::table('products')
+            ->select('products.id', 'products.name', 'consulting_environments.key_pix', 'products.price', 'products.draw_date')
+            ->join('consulting_environments', 'consulting_environments.user_id', '=', 'products.user_id')
+            ->where('products.id', '=', $productID)
+            ->first();
+
+
+        $participantDetail = DB::table('participant')
+            ->select('*')
+            ->where('participant.product_id', '=', $productID)
+            ->where('participant.telephone', '=', $resultTelephone)
+            ->first();
+
+        $participant = DB::table('participant')
+            ->select('*')
+            ->join('raffles', 'raffles.id', 'participant.raffles_id')
+            ->where('participant.product_id', '=', $productID)
+            ->where('participant.telephone', '=', $resultTelephone)
+            ->where('raffles.status', '=', 'Pago')
+            ->get();
+
+        $orderParticipants = DB::table('order')
+            ->select('order.id', 'order.key_pix', 'payment_pix.full_pix')
+            ->join('payment_pix', 'payment_pix.key_pix', 'order.key_pix')
+            ->join('participant', 'participant.id', 'payment_pix.participant_id')
+            ->join('raffles', 'raffles.id', 'participant.raffles_id')
+            ->where('participant.product_id', '=', $productID)
+            ->where('participant.telephone', '=', $resultTelephone)
+            ->where('raffles.status', '=', 'Reservado')
+            ->groupBy('order.id')
+            ->get();
+
+        //dd($orderParticipants);
+
+        $participantReserveds = DB::table('participant')
+            ->select('participant.id as user', 'raffles.*')
+            ->join('raffles', 'raffles.id', 'participant.raffles_id')
+            ->where('participant.product_id', '=', $productID)
+            ->where('participant.telephone', '=', $resultTelephone)
+            ->where('raffles.status', '=', 'Reservado')
+            ->get();
+
+        /*$participantReserveds = DB::table('participant')
+            ->select('participant.id as user', 'raffles.*', 'payment_pix.full_pix', 'order.id as order')
+            ->join('raffles', 'raffles.id', 'participant.raffles_id')
+            ->join('payment_pix', 'participant.id', 'payment_pix.participant_id')
+            ->join('order', 'payment_pix.key_pix', 'order.key_pix')
+            ->where('participant.product_id', '=', $productID)
+            ->where('participant.telephone', '=', $resultTelephone)
+            ->where('raffles.status', '=', 'Reservado')
+            ->get();*/
+
+        $telephoneConsulting = DB::table('products')
+            ->select('users.telephone')
+            ->join('users', 'users.id', '=', 'products.user_id')
+            ->where('products.id', '=', $request->productID)
+            ->first();
+
+        if ($participantReserveds == '[]') {
+        } else {
+            foreach ($participantReserveds as $rafflesNumber) {
+                $resultParticipantID[] = $rafflesNumber->user;
+                $resultRaffles[] = $rafflesNumber->number;
+            }
+
+            $numbers = implode(",", $resultRaffles);
+
+            $price = count($resultRaffles) * floatval($product->price);
+            $resultPricePIX = number_format($price, 2, ".", ",");
+            $convertPriceBR = number_format($price, 2, ",", ".");
+        }
+
+        return view('consulting-reservation-manualy', [
+            'product' => $product,
+            'participantDetail' => $participantDetail,
+            'resultRafflesALLs' => $participant,
+            'orderParticipants' => $orderParticipants,
+            'participantReserveds' => $participantReserveds,
+            'priceReserveds' => @$resultPricePIX,
+            'numberReserveds' => @$numbers,
+            'telephone' => $telephoneConsulting,
+            'priceBR' => @$convertPriceBR
+        ]);
+    }
+
+    public function paymentPix(Request $request)
+    {
+
+        $participantsID = explode("|", $request->participant_id);
+        //dd($raffles);
+
+        //VER UMA FORMA PARA MELHORAR ISSO HOJE SE ALGUEM ALTERAR O PARTICIPANTID NA URL VAI LATERAR A LINHA DO BANCO COM OS DADOS ERRADOS
+        foreach ($participantsID as $participantID) {
+            Payment_pix::updateOrCreate([
+                //Add unique field combo to match here
+                //For example, perhaps you only want one entry per user:
+                'participant_id'   => $participantID,
+            ], [
+                'key_pix' => $request->key_pix,
+                'participant_id' => $participantID,
+                'created_at' => Carbon::now(),
+                'updated_at' => Carbon::now()
+            ]);
+        }
+    }
+
+    public function paymentCredit(Request $request)
+    {
+        $codeKeyPIX = DB::table('consulting_environments')
+            ->select('key_pix')
+            ->where('user_id', '=', 1)
+            ->first();
+
+        if (env('APP_ENV') == 'local') {
+            $secretKey = 'TEST-330207199077363-081623-283cea3525fa71a8e4d1afa279bf8e8c-197295574';
+        } else {
+            $secretKey = $codeKeyPIX->key_pix;
+        }
+
+        \MercadoPago\SDK::setAccessToken($secretKey);
+
+        $payment = new \MercadoPago\Payment();
+        $payment->transaction_amount = (float)$request[0]['transaction_amount'];
+        $payment->token = $request[0]['token'];
+        //$payment->description = $request[0]['description'];
+        $payment->installments = (int)$request[0]['installments'];
+        $payment->payment_method_id = $request[0]['payment_method_id'];
+        $payment->issuer_id = (int)$request[0]['issuer_id'];
+
+        $payer = new \MercadoPago\Payer();
+        $payer->email = $request[0]['payer']['email'];
+        $payer->identification = array(
+            "type" => $request[0]['payer']['identification']['type'],
+            "number" => $request[0]['payer']['identification']['number']
+        );
+        $payment->payer = $payer;
+
+        $payment->save();
+
+        $response_fields = array(
+            'status' => $payment->status,
+            'status_detail' => $payment->status_detail,
+            'id' => $payment->id
+        );
+
+        if ($response_fields['status'] == 'approved') {
+
+            //FAZ A ALTERACAO NA RESERVA PARA PAGO
+            DB::table('payment_pix')
+                ->where('key_pix', $request[1])
+                ->update(['status' => 'Concluída']);
+
+            $updatingRaffles = DB::table('payment_pix')
+                ->join('participant', 'participant.id', '=', 'payment_pix.participant_id')
+                ->join('raffles', 'raffles.id', '=', 'participant.raffles_id')
+                ->where('payment_pix.key_pix', $request[1])
+                ->update(
+                    [
+                        'raffles.status' => 'Pago',
+                        'raffles.updated_at' => Carbon::now()
+                    ]
+                );
+
+            $participantEmail = DB::table('payment_pix')
+                ->select('participant.name', 'participant.email', 'participant.telephone', 'raffles.*', 'products.name as product', 'products.id as productID', 'products.ebook')
+                ->join('participant', 'participant.id', '=', 'payment_pix.participant_id')
+                ->join('raffles', 'raffles.id', '=', 'participant.raffles_id')
+                ->join('products', 'products.id', '=', 'participant.product_id')
+                ->where('payment_pix.key_pix', $request[1])
+                ->get();
+
+            $rafflesNumber = [];
+
+            foreach ($participantEmail as $raffle) {
+                array_push($rafflesNumber, $raffle->number);
+            }
+
+            $raffleImplode = implode(',', $rafflesNumber);
+
+            $consultingEnvironment = DB::table('consulting_environments')
+                ->first();
+
+            $dddTelephone = substr($participantEmail[0]->telephone, 1, 2);
+            $n1Telephone = substr($participantEmail[0]->telephone, 5, 5);
+            $n2Telephone = substr($participantEmail[0]->telephone, 11, 4);
+
+            $dados = array(
+                'name' => $participantEmail[0]->name,
+                'email' => $participantEmail[0]->email,
+                'product' => $participantEmail[0]->product,
+                'productID' => $participantEmail[0]->productID,
+                'url' => url('/products/' . $participantEmail[0]->ebook),
+                'raffles' => $raffleImplode,
+                'environment' => $consultingEnvironment->name,
+                'instagram' => $consultingEnvironment->instagram,
+                'facebook' => $consultingEnvironment->instagram,
+                'searchMyRaffles' => url('reserva/' . $participantEmail[0]->productID . '/' . $dddTelephone . $n1Telephone . $n2Telephone)
+            );
+
+            $emailUser = $participantEmail[0]->email;
+            $environment = $consultingEnvironment->name;
+
+            Mail::send('mails.payment', ['dados' => $dados], function ($message) use ($emailUser, $environment) {
+                $message->from('contato@gosolution.com.br', $environment);
+                $message->to($emailUser);
+                $message->subject('Ação entre amigos');
+            });
+        }
+
+        return redirect(url('checkout-manualy?status=') . $response_fields['status']);
+    }
+}
